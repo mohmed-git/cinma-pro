@@ -1,0 +1,113 @@
+---
+/**
+ * مكوّن الإعلانات العام (Popunder + Smartlink) — مضاد لمانع الإعلانات
+ * يُستدعى مرة واحدة من Base.astro فيغطي جميع صفحات الموقع.
+ *
+ * الأكواد من شبكة jabturfembitter.com (دومين cinmaplus.online):
+ *   - Popunder / Anti-AdBlock JS #1  (يُحمَّل تلقائياً — يفتح Popunder عند أول تفاعل)
+ *   - Popunder / Anti-AdBlock JS #2  (سكربت ثانٍ — يزيد التغطية/العائد)
+ *   - إعادة تشغيل Popunder بعد دقيقتين من البقاء في الصفحة (مرة إضافية واحدة)
+ *   - Smartlink يعمل كـ Popunder ثانوي على النقر (بفترة تهدئة لتقليل الإزعاج)
+ *
+ * الفلسفة: أكبر عدد نقرات ممكنة بأقل إزعاج — لا يوجد أي تحويل (redirect) للصفحة
+ * الحالية إطلاقاً، وكل شيء يفتح تحت الصفحة (popunder).
+ */
+---
+
+<!-- ═══════════════════════════════════════════════
+     1) Popunder / Anti-AdBlock #1 — يُحمَّل تلقائياً على كل الصفحات
+     ═══════════════════════════════════════════════ -->
+<script src="https://jabturfembitter.com/ee/83/d3/ee83d32a4831963ddc166312735eb9d8.js" is:inline></script>
+
+<!-- ═══════════════════════════════════════════════
+     2) Popunder / Anti-AdBlock #2 — سكربت ثانٍ لزيادة التغطية والعائد
+     ═══════════════════════════════════════════════ -->
+<script src="https://jabturfembitter.com/df/f1/06/dff1061fdbf27b3a8911a5baadea0754.js" is:inline></script>
+
+<!-- ═══════════════════════════════════════════════
+     3) إعادة تشغيل الـ Popunder مرة إضافية بعد دقيقتين من البقاء في الصفحة
+        (يعيد حقن السكربتين على أول تفاعل بعد الدقيقتين — مرة واحدة فقط لكل صفحة)
+     ═══════════════════════════════════════════════ -->
+<script is:inline>
+(function () {
+  const POPUNDER_SRCS = [
+    "https://jabturfembitter.com/ee/83/d3/ee83d32a4831963ddc166312735eb9d8.js",
+    "https://jabturfembitter.com/df/f1/06/dff1061fdbf27b3a8911a5baadea0754.js"
+  ];
+  const DWELL_MS = 120000; // دقيقتان
+  let secondFired = false;
+
+  setTimeout(function () {
+    if (secondFired) return;
+    const trigger = function () {
+      if (secondFired) return;
+      secondFired = true;
+      try {
+        POPUNDER_SRCS.forEach(function (src) {
+          const s = document.createElement("script");
+          s.src = src + "?r=" + Date.now(); // كسر الكاش لإعادة التنفيذ
+          s.async = true;
+          document.body.appendChild(s);
+        });
+      } catch (_) {}
+      document.removeEventListener("click", trigger, true);
+      document.removeEventListener("touchstart", trigger, true);
+    };
+    document.addEventListener("click", trigger, { capture: true, passive: true });
+    document.addEventListener("touchstart", trigger, { capture: true, passive: true });
+  }, DWELL_MS);
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════
+     4) Smartlink كـ Popunder ثانوي على النقر (بفترة تهدئة لتقليل الإزعاج)
+     ═══════════════════════════════════════════════ -->
+<script is:inline>
+(function () {
+  const SMARTLINK = "https://jabturfembitter.com/hnn75fn9?key=dd54d1faa15700e7397fc1ff8f2ae5e1";
+  const KEY = "_sl_fired";
+  const COOLDOWN_MS = 300000; // 5 دقائق — يقلّل الإزعاج مع الحفاظ على النقرات
+  const POPS_PER_CLICK = 1;   // نافذة popunder واحدة لكل نقرة مؤهَّلة (أقل إزعاج)
+
+  function shouldFire() {
+    try {
+      const last = parseInt(localStorage.getItem(KEY) || "0", 10);
+      return Date.now() - last > COOLDOWN_MS;
+    } catch (_) { return true; }
+  }
+
+  // يفتح نافذة popunder واحدة تحت الصفحة الحالية (سلوك popunder).
+  // لا يستخدم إطلاقاً window.location حتى لا يفتح الرابط في نفس الصفحة.
+  function openPopunder() {
+    try {
+      const w = window.open(
+        SMARTLINK,
+        "_blank",
+        "noopener,noreferrer,width=1024,height=768,scrollbars=yes,resizable=yes"
+      );
+      if (w) {
+        try { w.blur(); } catch (_) {}
+        try { window.focus(); } catch (_) {}
+        return true;
+      }
+    } catch (_) {}
+    return false; // فشل الفتح (حظر popup) — لا نلجأ لتحويل الصفحة إطلاقاً
+  }
+
+  function fire(e) {
+    // تجاهل النقرات على روابط الإعلانات نفسها
+    if (e.target && e.target.closest && e.target.closest('a[href*="jabturfembitter"]')) return;
+    if (!shouldFire()) return;
+    try { localStorage.setItem(KEY, String(Date.now())); } catch (_) {}
+    let opened = 0;
+    for (let i = 0; i < POPS_PER_CLICK; i++) {
+      if (openPopunder()) opened++;
+    }
+    // إذا حُجبت النافذة لا نفعل شيئاً (لا نحوّل الصفحة الحالية)
+  }
+
+  // مستمع متزامن مع النقرة (وليس passive) حتى يسمح المتصفح بفتح النوافذ
+  // ضمن سياق تفاعل المستخدم.
+  document.addEventListener("click", fire, { capture: true });
+})();
+</script>
