@@ -62,7 +62,8 @@ const canWatch = (firstEp?.servers?.length || 0) > 0;
 const firstEpisodeHref = getFirstEpisodeWatchRoute(title, detailKind);
 const similar = getSimilarTitles(title, 12).map(toIndexEntry);
 const genres = ['أنمي', ...splitGenres(title.genre).filter((genre) => genre !== 'أنمي')];
-const displayTitle = getDisplayTitle(title);
+const displayTitle = getDisplayTitle(title, detailKind);
+const cleanName = getDisplayTitle(title);
 const pageTitle = buildSeoTitle(title, detailKind);
 const pageDescription = buildMetaDescription(title, detailKind);
 const jsonLdDescription = buildJsonLdDescription(title, detailKind);
@@ -92,7 +93,7 @@ const jsonLd = buildWorkJsonLd(title, detailKind, {
     </div>
 
     <div class="container-app relative pb-12 pt-6 md:pb-16 md:pt-10">
-      <Breadcrumbs items={[{ label: 'الرئيسية', href: '/' }, { label: 'أنمي', href: listingRoute('anime') }, { label: displayTitle }]} />
+      <Breadcrumbs items={[{ label: 'الرئيسية', href: '/' }, { label: 'أنمي', href: listingRoute('anime') }, { label: cleanName }]} />
 
       <div class="mt-8 grid grid-cols-1 gap-8 md:grid-cols-12 md:gap-10">
         <div class="flex justify-center md:col-span-4 md:justify-start lg:col-span-3">

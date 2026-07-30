@@ -25,17 +25,6 @@ const slug = token ? decodeGateToken(token) : '';
 const title = slug ? await loadOldGateway(slug, Astro.url) : undefined;
 if (!title) return new Response('Not found', { status: 404 });
 
-// ArabSeed resolver Worker base URL (public, not a secret). Read from the
-// Cloudflare runtime env, fall back to process.env for `wrangler pages dev`.
-// Set it in Cloudflare Pages → Settings → Environment variables (ARSD_WORKER_URL)
-// after deploying the worker in /worker-arsd/. Empty string = feature disabled.
-const runtimeEnv = (Astro.locals as any)?.runtime?.env;
-const arsdWorkerUrl = (
-  (runtimeEnv && runtimeEnv.ARSD_WORKER_URL) ||
-  (typeof process !== 'undefined' && process.env && process.env.ARSD_WORKER_URL) ||
-  ''
-).toString().replace(/\/+$/, '');
-
 const sectionTheme =
   title.category === 'movie' ? 'movies' :
   title.category === 'series' ? 'series' : 'anime';
@@ -59,7 +48,6 @@ const titleData = {
   category: title.category,
   poster: title.poster || null,
   is_movie: title.category === 'movie' && title.episodes_count <= 1,
-  arsdWorkerUrl,
   seasons: title.seasons.map((s) => ({
     season: s.season,
     episodes: s.episodes.map((e) => ({
@@ -162,26 +150,6 @@ const dataJson = JSON.stringify(titleData);
           loading="eager"
         ></iframe>
 
-        <!-- ArabSeed native player (used only for type:'video' servers; hidden otherwise) -->
-        <video
-          id="video-native"
-          class="hidden h-full w-full bg-black"
-          controls
-          playsinline
-          preload="metadata"
-          crossorigin="anonymous"
-        ></video>
-
-        <!-- ArabSeed resolve error overlay -->
-        <div id="video-error" class="absolute inset-0 z-10 hidden flex flex-col items-center justify-center gap-3 bg-black/90 p-6 text-center text-gray-300">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-10 w-10 text-red-400">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <div class="text-sm font-bold text-white">تعذّر جلب رابط المشاهدة</div>
-          <div class="text-xs text-gray-500">جرّب سيرفرًا آخر أو أعد المحاولة بعد قليل.</div>
-          <button id="video-retry" type="button" class="btn-secondary mt-1 text-xs">إعادة المحاولة</button>
-        </div>
-
         <!-- Floating "open in new tab" button -->
         <a
           id="open-external"
@@ -262,7 +230,7 @@ const dataJson = JSON.stringify(titleData);
   <script id="watch-data" type="application/json" set:html={dataJson} />
 
   <script>
-    type Server = { id: number; label: string; url: string; type?: 'video' | 'iframe'; arsd_slug?: string };
+    type Server = { id: number; label: string; url: string };
     type Episode = { episode: number; servers: Server[] };
     type Season = { season: number; episodes: Episode[] };
     type Data = {
@@ -271,7 +239,6 @@ const dataJson = JSON.stringify(titleData);
       category: string;
       poster: string | null;
       is_movie: boolean;
-      arsdWorkerUrl: string;
       seasons: Season[];
     };
 
@@ -281,9 +248,6 @@ const dataJson = JSON.stringify(titleData);
 
     const subtitle = document.getElementById('watch-subtitle')!;
     const frame = document.getElementById('video-frame') as HTMLIFrameElement;
-    const native = document.getElementById('video-native') as HTMLVideoElement;
-    const videoError = document.getElementById('video-error')!;
-    const videoRetry = document.getElementById('video-retry') as HTMLButtonElement;
     const loading = document.getElementById('player-loading')!;
     const serversList = document.getElementById('servers-list')!;
     const serversCount = document.getElementById('servers-count')!;
@@ -293,74 +257,10 @@ const dataJson = JSON.stringify(titleData);
     const epLabel = document.getElementById('episode-label')!;
     const seasonsUI = document.getElementById('seasons-ui');
 
-    const WORKER = (data.arsdWorkerUrl || '').replace(/\/+$/, '');
-
     let currentServerUrl = '';
     function setCurrentServer(url: string) {
       currentServerUrl = url;
       openExternal.href = url || '#';
-    }
-
-    // ---- player-mode switching (iframe legacy embeds  vs  native <video> ArabSeed) ----
-    function showIframe() {
-      native.classList.add('hidden');
-      native.pause?.();
-      try { native.removeAttribute('src'); native.load(); } catch {}
-      videoError.classList.add('hidden');
-      frame.classList.remove('hidden');
-    }
-    function showNative() {
-      frame.classList.add('hidden');
-      frame.src = 'about:blank';
-      videoError.classList.add('hidden');
-      native.classList.remove('hidden');
-    }
-    function showVideoError() {
-      loading.classList.add('hidden');
-      videoError.classList.remove('hidden');
-    }
-
-    // Token to ignore stale resolve() responses when the user switches quickly.
-    let resolveToken = 0;
-    let lastArsdSlug = '';
-
-    // Resolve a fresh mp4 for an ArabSeed server via the Worker, then play in <video>.
-    async function playArsd(arsdSlug: string) {
-      lastArsdSlug = arsdSlug;
-      if (!WORKER) { showVideoError(); return; }
-      const my = ++resolveToken;
-      showNative();
-      loading.classList.remove('hidden');
-      openExternal.href = '#';
-      try {
-        const r = await fetch(`${WORKER}/resolve?slug=${encodeURIComponent(arsdSlug)}`);
-        const j = await r.json().catch(() => ({ ok: false }));
-        if (my !== resolveToken) return;            // superseded by a newer click
-        if (!r.ok || !j.ok || !j.mp4_url) throw new Error(j.error || 'resolve failed');
-        setCurrentServer(j.mp4_url);
-        native.src = j.mp4_url;
-        native.load();
-        native.play().catch(() => {});
-        loading.classList.add('hidden');
-      } catch {
-        if (my !== resolveToken) return;
-        showVideoError();
-      }
-    }
-    videoRetry.addEventListener('click', () => { if (lastArsdSlug) playArsd(lastArsdSlug); });
-    native.addEventListener('loadeddata', () => loading.classList.add('hidden'));
-    native.addEventListener('error', () => { if (native.classList.contains('hidden')) return; showVideoError(); });
-
-    // Play one server by its episode + index (branches on type: video → Worker, else iframe).
-    function playServer(sv: Server) {
-      if (sv && sv.type === 'video' && sv.arsd_slug) {
-        playArsd(sv.arsd_slug);
-      } else {
-        showIframe();
-        loading.classList.remove('hidden');
-        setCurrentServer(sv ? sv.url : '');
-        frame.src = sv ? sv.url : 'about:blank';
-      }
     }
 
     const flat: { season: number; episode: number }[] = [];
@@ -433,12 +333,15 @@ const dataJson = JSON.stringify(titleData);
 
       serversList.querySelectorAll<HTMLButtonElement>('.server-btn').forEach((b) => {
         b.addEventListener('click', () => {
+          const url = b.dataset.url!;
           const idx = Number(b.dataset.idx || 0);
           serversList.querySelectorAll<HTMLButtonElement>('.server-btn').forEach((x, j) => {
             if (j === idx) activateServerBtn(x);
             else deactivateServerBtn(x);
           });
-          playServer(ep.servers[idx]);
+          loading.classList.remove('hidden');
+          setCurrentServer(url);
+          frame.src = url;
         });
       });
 
@@ -510,9 +413,10 @@ const dataJson = JSON.stringify(titleData);
         ? 'مشاهدة مباشرة'
         : `الموسم ${s} · الحلقة ${e}`;
       if (ep.servers.length > 0) {
-        playServer(ep.servers[0]);
+        loading.classList.remove('hidden');
+        setCurrentServer(ep.servers[0].url);
+        frame.src = ep.servers[0].url;
       } else {
-        showIframe();
         setCurrentServer('');
         frame.src = 'about:blank';
       }

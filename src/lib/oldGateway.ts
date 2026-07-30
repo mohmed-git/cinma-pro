@@ -32,10 +32,6 @@ export interface GatewayServer {
   id: number;
   label: string;
   url: string;
-  /** 'video' = ArabSeed mp4 resolved on-demand via Worker; undefined = legacy iframe embed. */
-  type?: 'video' | 'iframe';
-  /** ArabSeed film slug — passed to the resolver Worker (?slug=) to fetch a fresh mp4. */
-  arsd_slug?: string;
 }
 export interface GatewayEpisode {
   episode: number;

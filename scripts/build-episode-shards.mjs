@@ -233,14 +233,7 @@ function processObject(jsonText) {
               ? s.episodes.map((e) => ({
                   episode: e.episode,
                   servers: Array.isArray(e.servers)
-                    ? e.servers.map((sv) => {
-                        const out = { id: sv.id, label: sv.label, url: sv.url };
-                        // ArabSeed servers: keep the on-demand marker + slug so the
-                        // gateway player resolves a fresh mp4 via the Worker.
-                        if (sv.type) out.type = sv.type;
-                        if (sv.arsd_slug) out.arsd_slug = sv.arsd_slug;
-                        return out;
-                      })
+                    ? e.servers.map((sv) => ({ id: sv.id, label: sv.label, url: sv.url }))
                     : [],
                 }))
               : [],

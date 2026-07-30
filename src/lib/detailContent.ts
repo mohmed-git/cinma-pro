@@ -206,6 +206,62 @@ function extractForeignTitle(title: Title): string {
   return clean || removeTitleNoise(title.clean_title);
 }
 
+/**
+ * Extract the LATIN (foreign) display name ONLY — used for the unified title
+ * scheme "<النوع> <Name> مترجم اون لاين".
+ *
+ * Rules (per the site owner's request "ج – الاسم اللاتيني فقط"):
+ *  - Start from the clean work title (no type prefix, no "مترجم اون لاين", no year).
+ *  - If it contains a Latin run, keep ONLY the Latin portion (drop the Arabic
+ *    part) — e.g. "حب في ارض الفيروز Love on the Turquoise Land" → "Love on the
+ *    Turquoise Land".
+ *  - If there is NO Latin at all (a purely Arabic-named work), fall back to the
+ *    clean Arabic name so we never emit an empty "<النوع> مترجم اون لاين".
+ */
+function latinOnlyName(title: Title): string {
+  // Clean base: strip type prefix (اوفا/أونا/فيلم…), noise, year.
+  const base = normalizeWhitespace(stripTypePrefix(removeTitleNoise(getWorkTitleWithoutYear(title))));
+
+  // Pull a contiguous Latin run (letters/digits + common punctuation between).
+  const pickLatin = (s: string): string => {
+    const m = s.match(/[A-Za-z0-9][A-Za-z0-9\s.,'’&:+\-–—½!()?]*[A-Za-z0-9½)]/);
+    return m?.[0] ? normalizeWhitespace(m[0]).replace(/[\s\-–—:|,]+$/g, '').trim() : '';
+  };
+
+  let latin = pickLatin(base);
+  if (!latin) latin = pickLatin(removeTitleNoise(title.raw_name));
+  if (latin) return latin;
+
+  // No Latin name anywhere → keep the clean Arabic name (never empty).
+  return base || normalizeWhitespace(cleanBrand(getWorkTitle(title))) || normalizeWhitespace(cleanBrand(title.clean_title));
+}
+
+/**
+ * The browser-tab <title> shown in search results (owner spec).
+ *   Series / Anime → "مشاهدة <النوع> <Latin name> <سنة> مترجم جميع الحلقات اون لاين"
+ *     مشاهدة مسلسل Asia Insight 2012 مترجم جميع الحلقات اون لاين
+ *   Movie          → "مشاهدة فيلم <Latin name> <سنة> مترجم اون لاين"
+ *     مشاهدة فيلم Human Resource 2025 مترجم اون لاين
+ * Year is included when available; no brand suffix.
+ */
+export function buildUnifiedTitle(title: Title, kind: DetailKind): string {
+  const type = typeName(kind); // فيلم / مسلسل / أنمي
+  const name = latinOnlyName(title);
+  const year = title.year ? ` ${title.year}` : '';
+  // "جميع الحلقات" only makes sense for episodic works (series & anime).
+  const suffix = kind === 'movie' ? 'مترجم اون لاين' : 'مترجم جميع الحلقات اون لاين';
+  return normalizeWhitespace(`مشاهدة ${type} ${name}${year} ${suffix}`);
+}
+
+/**
+ * The on-page H1: the WORK NAME ONLY (Latin name, no type, no "مترجم", no year).
+ *   Asia Insight
+ *   Human Resource
+ */
+export function buildH1Title(title: Title): string {
+  return normalizeWhitespace(latinOnlyName(title));
+}
+
 const ARABIZED_WORDS: Record<string, string> = {
   a: '',
   an: '',
@@ -533,7 +589,14 @@ function buildSeoTeaser(title: Title, max: number, kind: DetailKind = 'movie'): 
   return truncateChars(candidate || story, max);
 }
 
-export function getDisplayTitle(title: Title): string {
+/**
+ * The on-page display title.
+ *  - With `kind` (detail pages) → the H1 = WORK NAME ONLY (Latin name).
+ *  - Without `kind` (e.g. JSON-LD `name`, breadcrumbs) → the clean work name only,
+ *    preserving the previous behaviour so structured data keeps the real entity name.
+ */
+export function getDisplayTitle(title: Title, kind?: DetailKind): string {
+  if (kind) return buildH1Title(title);
   return cleanBrand(title.clean_title);
 }
 
@@ -1337,31 +1400,16 @@ export function buildFaqs(title: Title, kind: DetailKind): DetailFaq[] {
 }
 
 export function buildSeoTitle(title: Title, kind: DetailKind): string {
-  let { arabized, foreign } = seoNamePair(title);
-  // Guard against an empty name (e.g. a work literally titled with a year such
-  // as "2073", where removeTitleNoise strips the digits as a "year"). Never
-  // emit a nameless "<space> فيلم مترجم…" title — fall back to the raw title.
-  if (!normalizeWhitespace(arabized) && !normalizeWhitespace(foreign)) {
-    const raw = normalizeWhitespace(cleanBrand(getWorkTitle(title)) || cleanBrand(title.clean_title) || cleanBrand(title.raw_name));
-    arabized = raw;
-    foreign = '';
-  }
-  return fitSeoTitle(arabized, foreign, kind);
+  // Unified scheme (owner spec): "<النوع> <Latin name> مترجم اون لاين".
+  return buildUnifiedTitle(title, kind);
 }
 
 export function buildMetaDescription(title: Title, kind: DetailKind): string {
   const type = typeName(kind);
   const year = title.year || '';
-  // Use the cleaned SEO name (type prefixes like اوفا/أونا stripped) so the
-  // meta description name matches the <title> and avoids duplicated boilerplate.
-  const { arabized, foreign } = seoNamePair(title);
-  let seoName = '';
-  if (!foreign || arabized === foreign) { seoName = arabized || foreign; }
-  else if (arabized && foreign.includes(arabized)) { seoName = foreign; }
-  else if (foreign && arabized.includes(foreign)) { seoName = arabized; }
-  else if (arabized && foreign) { seoName = `${arabized} ${foreign}`; }
-  else { seoName = arabized || foreign; }
-  seoName = normalizeWhitespace(seoName) || getWorkTitleWithoutYear(title) || getWorkTitle(title);
+  // Unified with the <title>/H1: use the Latin-only name so the meta description
+  // opens with exactly the same name the searcher sees in the title.
+  let seoName = normalizeWhitespace(latinOnlyName(title)) || getWorkTitleWithoutYear(title) || getWorkTitle(title);
   const compactName = truncateChars(seoName, 44);
   const prefix = `شاهد ${type} ${compactName}${year ? ` ${year}` : ''}: `;
   const suffix = ` مترجم HD اون لاين.`;
